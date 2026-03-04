@@ -502,21 +502,23 @@
   }
 
   function normalizeImageUrl(url) {
-    // Google Drive: convert sharing links to direct download
-    // Pattern: https://drive.google.com/file/d/FILE_ID/view...
+    // Google Drive: convert any sharing link to the lh3 direct image URL
+    // This endpoint returns actual image bytes with Access-Control-Allow-Origin: *
     var driveMatch = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
     if (driveMatch) {
-      return 'https://drive.google.com/uc?export=download&id=' + driveMatch[1];
+      return 'https://lh3.googleusercontent.com/d/' + driveMatch[1];
     }
-    // Google Drive: open?id=FILE_ID
     var driveMatch2 = url.match(/drive\.google\.com\/open\?id=([a-zA-Z0-9_-]+)/);
     if (driveMatch2) {
-      return 'https://drive.google.com/uc?export=download&id=' + driveMatch2[1];
+      return 'https://lh3.googleusercontent.com/d/' + driveMatch2[1];
     }
-    // Google Drive: uc?id=FILE_ID (already direct, but ensure export param)
     var driveMatch3 = url.match(/drive\.google\.com\/uc\?.*id=([a-zA-Z0-9_-]+)/);
     if (driveMatch3) {
-      return 'https://drive.google.com/uc?export=download&id=' + driveMatch3[1];
+      return 'https://lh3.googleusercontent.com/d/' + driveMatch3[1];
+    }
+    // lh3 links are already good
+    if (url.indexOf('lh3.googleusercontent.com') !== -1) {
+      return url;
     }
     return url;
   }
@@ -524,45 +526,38 @@
   async function fetchImageBytes(url) {
     url = normalizeImageUrl(url);
 
-    // Strategy 1: Direct fetch (works for same-origin or CORS-enabled images)
+    // Strategy 1: Direct fetch (works for CORS-enabled hosts, lh3.googleusercontent.com, etc.)
     try {
       var resp = await fetch(url, { mode: 'cors' });
       if (resp.ok) {
-        var buffer = await resp.arrayBuffer();
-        if (buffer.byteLength > 0) {
-          return Array.from(new Uint8Array(buffer));
+        var ct = resp.headers.get('content-type') || '';
+        // Make sure we got an image, not an HTML error page
+        if (ct.startsWith('image/') || ct === 'application/octet-stream') {
+          var buffer = await resp.arrayBuffer();
+          if (buffer.byteLength > 0) {
+            return Array.from(new Uint8Array(buffer));
+          }
         }
       }
     } catch (e) {
       // CORS blocked — fall through to proxy
     }
 
-    // Strategy 2: Use allorigins.win CORS proxy
+    // Strategy 2: Use images.weserv.nl (image proxy with CORS headers, handles redirects)
     try {
-      var proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
-      var resp2 = await fetch(proxyUrl);
+      var weservUrl = 'https://images.weserv.nl/?url=' + encodeURIComponent(url);
+      var resp2 = await fetch(weservUrl);
       if (resp2.ok) {
-        var buffer2 = await resp2.arrayBuffer();
-        if (buffer2.byteLength > 0) {
-          return Array.from(new Uint8Array(buffer2));
+        var ct2 = resp2.headers.get('content-type') || '';
+        if (ct2.startsWith('image/')) {
+          var buffer2 = await resp2.arrayBuffer();
+          if (buffer2.byteLength > 0) {
+            return Array.from(new Uint8Array(buffer2));
+          }
         }
       }
     } catch (e2) {
-      // proxy also failed
-    }
-
-    // Strategy 3: Use corsproxy.io as a second fallback
-    try {
-      var proxyUrl2 = 'https://corsproxy.io/?' + encodeURIComponent(url);
-      var resp3 = await fetch(proxyUrl2);
-      if (resp3.ok) {
-        var buffer3 = await resp3.arrayBuffer();
-        if (buffer3.byteLength > 0) {
-          return Array.from(new Uint8Array(buffer3));
-        }
-      }
-    } catch (e3) {
-      // all strategies failed
+      // proxy failed
     }
 
     throw new Error('All image fetch strategies failed for: ' + url);
