@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Figma Plugin Data Fetcher</title>
+  </head>
+  <body>
+    <script>
+      // Use Corsfix to make the request
+      fetch(`https://proxy.corsfix.com/?<TARGET_URL>`)
+        .then((response) => response.json())
+        .then((data) => {
+          // Send data back to the Figma plugin
+          parent.postMessage(
+            { pluginMessage: { type: "fetch-result", data }, pluginId: "*" },
+            "*"
+          );
+        })
+        .catch((error) => {
+          parent.postMessage(
+            {
+              pluginMessage: { type: "fetch-error", error: error.message },
+              pluginId: "*",
+            },
+            "*"
+          );
+        });
+    </script>
+  </body>
+</html>
