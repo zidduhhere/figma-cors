@@ -464,9 +464,11 @@
         var imgUrl = row[imageColIdx].trim();
         if (imgUrl && (imgUrl.startsWith('http://') || imgUrl.startsWith('https://'))) {
           try {
+            progressText.textContent = 'Fetching image ' + (i + 1) + ' of ' + totalRows + '...';
             imageBytes = await fetchImageBytes(imgUrl);
           } catch (e) {
             console.warn('Failed to fetch image for row ' + (i + 1) + ': ' + e.message);
+            progressText.textContent = 'Row ' + (i + 1) + ': Image fetch failed, skipping...';
           }
         }
       }
@@ -499,12 +501,71 @@
     });
   }
 
-  async function fetchImageBytes(url) {
-    var resp = await fetch(url);
-    if (!resp.ok) throw new Error('Image fetch failed: HTTP ' + resp.status);
+  function normalizeImageUrl(url) {
+    // Google Drive: convert sharing links to direct download
+    // Pattern: https://drive.google.com/file/d/FILE_ID/view...
+    var driveMatch = url.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+    if (driveMatch) {
+      return 'https://drive.google.com/uc?export=download&id=' + driveMatch[1];
+    }
+    // Google Drive: open?id=FILE_ID
+    var driveMatch2 = url.match(/drive\.google\.com\/open\?id=([a-zA-Z0-9_-]+)/);
+    if (driveMatch2) {
+      return 'https://drive.google.com/uc?export=download&id=' + driveMatch2[1];
+    }
+    // Google Drive: uc?id=FILE_ID (already direct, but ensure export param)
+    var driveMatch3 = url.match(/drive\.google\.com\/uc\?.*id=([a-zA-Z0-9_-]+)/);
+    if (driveMatch3) {
+      return 'https://drive.google.com/uc?export=download&id=' + driveMatch3[1];
+    }
+    return url;
+  }
 
-    var buffer = await resp.arrayBuffer();
-    return Array.from(new Uint8Array(buffer));
+  async function fetchImageBytes(url) {
+    url = normalizeImageUrl(url);
+
+    // Strategy 1: Direct fetch (works for same-origin or CORS-enabled images)
+    try {
+      var resp = await fetch(url, { mode: 'cors' });
+      if (resp.ok) {
+        var buffer = await resp.arrayBuffer();
+        if (buffer.byteLength > 0) {
+          return Array.from(new Uint8Array(buffer));
+        }
+      }
+    } catch (e) {
+      // CORS blocked — fall through to proxy
+    }
+
+    // Strategy 2: Use allorigins.win CORS proxy
+    try {
+      var proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
+      var resp2 = await fetch(proxyUrl);
+      if (resp2.ok) {
+        var buffer2 = await resp2.arrayBuffer();
+        if (buffer2.byteLength > 0) {
+          return Array.from(new Uint8Array(buffer2));
+        }
+      }
+    } catch (e2) {
+      // proxy also failed
+    }
+
+    // Strategy 3: Use corsproxy.io as a second fallback
+    try {
+      var proxyUrl2 = 'https://corsproxy.io/?' + encodeURIComponent(url);
+      var resp3 = await fetch(proxyUrl2);
+      if (resp3.ok) {
+        var buffer3 = await resp3.arrayBuffer();
+        if (buffer3.byteLength > 0) {
+          return Array.from(new Uint8Array(buffer3));
+        }
+      }
+    } catch (e3) {
+      // all strategies failed
+    }
+
+    throw new Error('All image fetch strategies failed for: ' + url);
   }
 
   // ---- Listen for messages from plugin sandbox ----
