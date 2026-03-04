@@ -226,13 +226,9 @@
     return match ? match[1] : null;
   }
 
-  function proxyUrl(url) {
-    return 'https://proxy.corsfix.com/?' + encodeURIComponent(url);
-  }
-
   async function fetchSheetNames(id) {
     var url = 'https://docs.google.com/spreadsheets/d/' + id + '/gviz/tq?tqx=out:csv&headers=1&range=A1:A1';
-    var resp = await fetch(proxyUrl(url));
+    var resp = await fetch(url);
     if (!resp.ok) throw new Error('Could not access spreadsheet. Make sure it is shared as "Anyone with the link can view".');
     return true;
   }
@@ -240,7 +236,7 @@
   async function fetchSheetList(id) {
     try {
       var htmlUrl = 'https://docs.google.com/spreadsheets/d/' + id + '/htmlview';
-      var resp = await fetch(proxyUrl(htmlUrl));
+      var resp = await fetch(htmlUrl);
       var text = await resp.text();
 
       var sheetNames = [];
@@ -327,7 +323,7 @@
 
   async function loadSheetData(sheetName) {
     var csvUrl = 'https://docs.google.com/spreadsheets/d/' + sheetId + '/gviz/tq?tqx=out:csv&sheet=' + encodeURIComponent(sheetName);
-    var resp = await fetch(proxyUrl(csvUrl));
+    var resp = await fetch(csvUrl);
     if (!resp.ok) throw new Error('Could not load sheet data.');
     var csvText = await resp.text();
 
@@ -504,15 +500,8 @@
   }
 
   async function fetchImageBytes(url) {
-    var resp;
-    try {
-      resp = await fetch(url);
-      if (!resp.ok) throw new Error('Direct fetch failed');
-    } catch (e) {
-      // Fallback to CORS proxy
-      resp = await fetch(proxyUrl(url));
-      if (!resp.ok) throw new Error('Image fetch failed via proxy');
-    }
+    var resp = await fetch(url);
+    if (!resp.ok) throw new Error('Image fetch failed: HTTP ' + resp.status);
 
     var buffer = await resp.arrayBuffer();
     return Array.from(new Uint8Array(buffer));
