@@ -1,29 +1,543 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <title>Figma Plugin Data Fetcher</title>
-  </head>
-  <body>
-    <script>
-      // Use Corsfix to make the request
-      fetch(`https://proxy.corsfix.com/?<TARGET_URL>`)
-        .then((response) => response.json())
-        .then((data) => {
-          // Send data back to the Figma plugin
-          parent.postMessage(
-            { pluginMessage: { type: "fetch-result", data }, pluginId: "*" },
-            "*"
-          );
-        })
-        .catch((error) => {
-          parent.postMessage(
-            {
-              pluginMessage: { type: "fetch-error", error: error.message },
-              pluginId: "*",
-            },
-            "*"
-          );
-        });
-    </script>
-  </body>
+<head>
+  <title>Excel Images - Figma Plugin</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 12px;
+      color: #333;
+      padding: 12px;
+      background: #fff;
+    }
+    h2 { font-size: 14px; margin-bottom: 8px; color: #1a1a1a; }
+    p.description { font-size: 11px; color: #666; margin-bottom: 12px; }
+
+    .step { display: none; }
+    .step.active { display: block; }
+
+    label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 11px; color: #555; }
+    input[type="text"], input[type="number"], select {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 12px;
+      margin-bottom: 10px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus, select:focus { border-color: #18a0fb; }
+
+    .btn {
+      display: inline-block;
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn-primary { background: #18a0fb; color: #fff; }
+    .btn-primary:hover { background: #0d8de5; }
+    .btn-primary:disabled { background: #ccc; cursor: not-allowed; }
+    .btn-secondary { background: #f0f0f0; color: #333; margin-right: 8px; }
+    .btn-secondary:hover { background: #e0e0e0; }
+
+    .btn-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+
+    .error { color: #e03e3e; font-size: 11px; margin-bottom: 8px; display: none; }
+    .error.show { display: block; }
+
+    .loading { display: none; align-items: center; gap: 8px; font-size: 11px; color: #666; margin: 8px 0; }
+    .loading.show { display: flex; }
+    .spinner {
+      width: 14px; height: 14px;
+      border: 2px solid #ddd; border-top-color: #18a0fb;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .preview-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 8px 0;
+      font-size: 10px;
+    }
+    .preview-table th, .preview-table td {
+      border: 1px solid #eee;
+      padding: 4px 6px;
+      text-align: left;
+      max-width: 120px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .preview-table th { background: #f5f5f5; font-weight: 600; }
+
+    .column-mapping { margin: 10px 0; }
+    .column-mapping .mapping-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .column-mapping .mapping-row label { margin-bottom: 0; min-width: 90px; }
+    .column-mapping .mapping-row select { margin-bottom: 0; flex: 1; }
+
+    .checkbox-group { margin-bottom: 10px; }
+    .checkbox-group label {
+      font-weight: 400;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 4px;
+      cursor: pointer;
+    }
+    .checkbox-group input[type="checkbox"] { margin: 0; }
+
+    .settings-row { display: flex; gap: 12px; }
+    .settings-row > div { flex: 1; }
+
+    .progress-bar {
+      width: 100%;
+      height: 6px;
+      background: #eee;
+      border-radius: 3px;
+      overflow: hidden;
+      margin: 8px 0;
+    }
+    .progress-fill {
+      height: 100%;
+      background: #18a0fb;
+      border-radius: 3px;
+      transition: width 0.3s;
+      width: 0%;
+    }
+    .progress-text { font-size: 11px; color: #666; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+
+  <!-- STEP 1: URL Input -->
+  <div id="step1" class="step active">
+    <h2>Google Sheets Import</h2>
+    <p class="description">Paste a public Google Sheet URL to get started.</p>
+
+    <label for="sheetUrl">Google Sheet URL</label>
+    <input type="text" id="sheetUrl" placeholder="https://docs.google.com/spreadsheets/d/...">
+
+    <div id="sheetSelector" style="display:none;">
+      <label for="sheetName">Select Sheet</label>
+      <select id="sheetName"></select>
+    </div>
+
+    <div id="loadError" class="error"></div>
+    <div id="loadLoading" class="loading">
+      <div class="spinner"></div>
+      <span>Loading spreadsheet...</span>
+    </div>
+
+    <div class="btn-row">
+      <button id="cancelBtn1" class="btn btn-secondary" onclick="cancel()">Cancel</button>
+      <button id="loadBtn" class="btn btn-primary" onclick="loadSheet()">Load Sheet</button>
+    </div>
+  </div>
+
+  <!-- STEP 2: Column Mapping -->
+  <div id="step2" class="step">
+    <h2>Map Columns</h2>
+    <p class="description">Select which columns to use for images and text.</p>
+
+    <div id="previewContainer"></div>
+
+    <div class="column-mapping">
+      <div class="mapping-row">
+        <label>Image URL Column</label>
+        <select id="imageColumn"></select>
+      </div>
+    </div>
+
+    <label>Text Columns (displayed below image)</label>
+    <div id="textColumns" class="checkbox-group"></div>
+
+    <div class="settings-row">
+      <div>
+        <label for="gridCols">Grid Columns</label>
+        <input type="number" id="gridCols" value="4" min="1" max="20">
+      </div>
+      <div>
+        <label for="cardSpacing">Spacing (px)</label>
+        <input type="number" id="cardSpacing" value="20" min="0" max="200">
+      </div>
+      <div>
+        <label for="imageSize">Image Size (px)</label>
+        <input type="number" id="imageSize" value="200" min="50" max="1000">
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="goToStep(1)">Back</button>
+      <button class="btn btn-primary" onclick="generateCards()">Generate Frames</button>
+    </div>
+  </div>
+
+  <!-- STEP 3: Progress -->
+  <div id="step3" class="step">
+    <h2>Generating Frames</h2>
+    <div class="progress-bar"><div id="progressFill" class="progress-fill"></div></div>
+    <div id="progressText" class="progress-text">Preparing...</div>
+    <div id="genError" class="error"></div>
+    <div class="btn-row">
+      <button id="doneBtn" class="btn btn-primary" style="display:none;" onclick="cancel()">Done</button>
+    </div>
+  </div>
+
+<script>
+  // ---- State ----
+  var sheetId = '';
+  var headers = [];
+  var rows = [];
+  var allRows = [];
+
+  // ---- Figma Plugin Communication ----
+  // This page is loaded inside a Figma plugin iframe via redirect.
+  // We communicate with the plugin sandbox via parent.postMessage.
+  function postToPlugin(msg) {
+    parent.postMessage({ pluginMessage: msg, pluginId: '*' }, '*');
+  }
+
+  // ---- Navigation ----
+  function goToStep(n) {
+    document.querySelectorAll('.step').forEach(function(s) { s.classList.remove('active'); });
+    document.getElementById('step' + n).classList.add('active');
+  }
+
+  function cancel() {
+    postToPlugin({ type: 'cancel' });
+  }
+
+  // ---- Step 1: Load Sheet ----
+  function extractSheetId(url) {
+    var match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+    return match ? match[1] : null;
+  }
+
+  function proxyUrl(url) {
+    return 'https://proxy.corsfix.com/?' + encodeURIComponent(url);
+  }
+
+  async function fetchSheetNames(id) {
+    var url = 'https://docs.google.com/spreadsheets/d/' + id + '/gviz/tq?tqx=out:csv&headers=1&range=A1:A1';
+    var resp = await fetch(proxyUrl(url));
+    if (!resp.ok) throw new Error('Could not access spreadsheet. Make sure it is shared as "Anyone with the link can view".');
+    return true;
+  }
+
+  async function fetchSheetList(id) {
+    try {
+      var htmlUrl = 'https://docs.google.com/spreadsheets/d/' + id + '/htmlview';
+      var resp = await fetch(proxyUrl(htmlUrl));
+      var text = await resp.text();
+
+      var sheetNames = [];
+      // Pattern 1: sheet-button elements
+      var regex = /id="sheet-button-[^"]*"[^>]*>([^<]+)</g;
+      var match;
+      while ((match = regex.exec(text)) !== null) {
+        sheetNames.push(match[1].trim());
+      }
+
+      // Pattern 2: sheet-tab elements
+      if (sheetNames.length === 0) {
+        var regex2 = /<li[^>]*class="[^"]*sheet-tab[^"]*"[^>]*>[\s\S]*?<span[^>]*>([^<]+)<\/span>/g;
+        while ((match = regex2.exec(text)) !== null) {
+          sheetNames.push(match[1].trim());
+        }
+      }
+
+      if (sheetNames.length === 0) {
+        sheetNames.push('Sheet1');
+      }
+
+      return sheetNames;
+    } catch (e) {
+      return ['Sheet1'];
+    }
+  }
+
+  async function loadSheet() {
+    var url = document.getElementById('sheetUrl').value.trim();
+    var errorEl = document.getElementById('loadError');
+    var loadingEl = document.getElementById('loadLoading');
+
+    errorEl.classList.remove('show');
+    errorEl.textContent = '';
+
+    sheetId = extractSheetId(url);
+    if (!sheetId) {
+      errorEl.textContent = 'Invalid Google Sheets URL. Please paste a valid link.';
+      errorEl.classList.add('show');
+      return;
+    }
+
+    loadingEl.classList.add('show');
+    document.getElementById('loadBtn').disabled = true;
+
+    try {
+      await fetchSheetNames(sheetId);
+
+      var sheetNames = await fetchSheetList(sheetId);
+      var selector = document.getElementById('sheetName');
+      selector.innerHTML = '';
+      sheetNames.forEach(function(name) {
+        var opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        selector.appendChild(opt);
+      });
+      document.getElementById('sheetSelector').style.display = 'block';
+
+      await loadSheetData(sheetNames[0]);
+
+    } catch (e) {
+      errorEl.textContent = e.message;
+      errorEl.classList.add('show');
+    } finally {
+      loadingEl.classList.remove('show');
+      document.getElementById('loadBtn').disabled = false;
+    }
+  }
+
+  document.getElementById('sheetName').addEventListener('change', async function(e) {
+    var loadingEl = document.getElementById('loadLoading');
+    loadingEl.classList.add('show');
+    try {
+      await loadSheetData(e.target.value);
+    } catch (err) {
+      document.getElementById('loadError').textContent = err.message;
+      document.getElementById('loadError').classList.add('show');
+    } finally {
+      loadingEl.classList.remove('show');
+    }
+  });
+
+  async function loadSheetData(sheetName) {
+    var csvUrl = 'https://docs.google.com/spreadsheets/d/' + sheetId + '/gviz/tq?tqx=out:csv&sheet=' + encodeURIComponent(sheetName);
+    var resp = await fetch(proxyUrl(csvUrl));
+    if (!resp.ok) throw new Error('Could not load sheet data.');
+    var csvText = await resp.text();
+
+    var parsed = parseCSV(csvText);
+    if (parsed.length < 2) throw new Error('Sheet appears to be empty or has no data rows.');
+
+    headers = parsed[0];
+    allRows = parsed.slice(1);
+    rows = allRows.slice(0, 3);
+
+    buildStep2();
+    goToStep(2);
+  }
+
+  function parseCSV(text) {
+    var result = [];
+    var current = [];
+    var field = '';
+    var inQuotes = false;
+
+    for (var i = 0; i < text.length; i++) {
+      var ch = text[i];
+      var next = text[i + 1];
+
+      if (inQuotes) {
+        if (ch === '"' && next === '"') {
+          field += '"';
+          i++;
+        } else if (ch === '"') {
+          inQuotes = false;
+        } else {
+          field += ch;
+        }
+      } else {
+        if (ch === '"') {
+          inQuotes = true;
+        } else if (ch === ',') {
+          current.push(field);
+          field = '';
+        } else if (ch === '\n' || (ch === '\r' && next === '\n')) {
+          current.push(field);
+          field = '';
+          if (current.length > 0) result.push(current);
+          current = [];
+          if (ch === '\r') i++;
+        } else if (ch === '\r') {
+          current.push(field);
+          field = '';
+          if (current.length > 0) result.push(current);
+          current = [];
+        } else {
+          field += ch;
+        }
+      }
+    }
+    current.push(field);
+    if (current.length > 0 && current.some(function(f) { return f.length > 0; })) result.push(current);
+
+    return result;
+  }
+
+  // ---- Step 2: Column Mapping ----
+  function buildStep2() {
+    var container = document.getElementById('previewContainer');
+    var html = '<table class="preview-table"><thead><tr>';
+    headers.forEach(function(h) { html += '<th>' + escapeHtml(h) + '</th>'; });
+    html += '</tr></thead><tbody>';
+    rows.forEach(function(row) {
+      html += '<tr>';
+      headers.forEach(function(_, i) {
+        var val = row[i] || '';
+        html += '<td title="' + escapeHtml(val) + '">' + escapeHtml(val) + '</td>';
+      });
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+
+    // Image column dropdown
+    var imgSelect = document.getElementById('imageColumn');
+    imgSelect.innerHTML = '<option value="">(None - no image)</option>';
+    headers.forEach(function(h, i) {
+      var opt = document.createElement('option');
+      opt.value = i;
+      opt.textContent = h;
+      if (/image|photo|picture|img|avatar|pic|url/i.test(h)) {
+        opt.selected = true;
+      }
+      imgSelect.appendChild(opt);
+    });
+
+    // Text columns checkboxes
+    var textDiv = document.getElementById('textColumns');
+    textDiv.innerHTML = '';
+    headers.forEach(function(h, i) {
+      var label = document.createElement('label');
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = i;
+      if (!/image|photo|picture|img|avatar|url/i.test(h)) {
+        cb.checked = true;
+      }
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(h));
+      textDiv.appendChild(label);
+    });
+  }
+
+  function escapeHtml(str) {
+    var div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  // ---- Step 3: Generate ----
+  async function generateCards() {
+    goToStep(3);
+
+    var imageColIdx = document.getElementById('imageColumn').value;
+    var textColIdxs = Array.from(document.querySelectorAll('#textColumns input:checked')).map(function(cb) { return parseInt(cb.value); });
+    var gridCols = parseInt(document.getElementById('gridCols').value) || 4;
+    var spacing = parseInt(document.getElementById('cardSpacing').value) || 20;
+    var imageSize = parseInt(document.getElementById('imageSize').value) || 200;
+
+    var progressFill = document.getElementById('progressFill');
+    var progressText = document.getElementById('progressText');
+
+    var totalRows = allRows.length;
+    var cardData = [];
+
+    for (var i = 0; i < totalRows; i++) {
+      var row = allRows[i];
+      progressText.textContent = 'Processing row ' + (i + 1) + ' of ' + totalRows + '...';
+      progressFill.style.width = ((i + 1) / totalRows * 80) + '%';
+
+      var imageBytes = null;
+      if (imageColIdx !== '' && row[imageColIdx]) {
+        var imgUrl = row[imageColIdx].trim();
+        if (imgUrl && (imgUrl.startsWith('http://') || imgUrl.startsWith('https://'))) {
+          try {
+            imageBytes = await fetchImageBytes(imgUrl);
+          } catch (e) {
+            console.warn('Failed to fetch image for row ' + (i + 1) + ': ' + e.message);
+          }
+        }
+      }
+
+      var textFields = textColIdxs.map(function(idx) {
+        return {
+          header: headers[idx] || '',
+          value: row[idx] || ''
+        };
+      });
+
+      cardData.push({
+        imageBytes: imageBytes,
+        textFields: textFields
+      });
+    }
+
+    progressText.textContent = 'Sending data to Figma...';
+    progressFill.style.width = '90%';
+
+    // Send to plugin sandbox
+    postToPlugin({
+      type: 'generate-cards',
+      cards: cardData,
+      settings: {
+        gridCols: gridCols,
+        spacing: spacing,
+        imageSize: imageSize
+      }
+    });
+  }
+
+  async function fetchImageBytes(url) {
+    var resp;
+    try {
+      resp = await fetch(url);
+      if (!resp.ok) throw new Error('Direct fetch failed');
+    } catch (e) {
+      // Fallback to CORS proxy
+      resp = await fetch(proxyUrl(url));
+      if (!resp.ok) throw new Error('Image fetch failed via proxy');
+    }
+
+    var buffer = await resp.arrayBuffer();
+    return Array.from(new Uint8Array(buffer));
+  }
+
+  // ---- Listen for messages from plugin sandbox ----
+  window.addEventListener('message', function(event) {
+    var msg = event.data && event.data.pluginMessage;
+    if (!msg) return;
+
+    if (msg.type === 'progress') {
+      document.getElementById('progressFill').style.width = msg.percent + '%';
+      document.getElementById('progressText').textContent = msg.text;
+    } else if (msg.type === 'done') {
+      document.getElementById('progressFill').style.width = '100%';
+      document.getElementById('progressText').textContent = 'Done! Created ' + msg.count + ' card frames.';
+      document.getElementById('doneBtn').style.display = 'inline-block';
+    } else if (msg.type === 'error') {
+      document.getElementById('genError').textContent = msg.message;
+      document.getElementById('genError').classList.add('show');
+      document.getElementById('doneBtn').style.display = 'inline-block';
+      document.getElementById('doneBtn').textContent = 'Close';
+    }
+  });
+</script>
+
+</body>
 </html>
